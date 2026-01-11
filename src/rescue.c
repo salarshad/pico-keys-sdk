@@ -226,7 +226,7 @@ int cmd_write() {
 
     uint8_t p1 = P1(apdu), p2 = P2(apdu);
 
-    if (p1 == 0x1) { // PHY
+    if (p1 == 0x1 && p2 != 0xff) { // PHY
 #ifndef ENABLE_EMULATION
         int ret = phy_unserialize_data(apdu.data, (uint16_t)apdu.nc, &phy_data);
         if (ret == PICOKEY_OK) {
@@ -234,6 +234,15 @@ int cmd_write() {
                 return SW_EXEC_ERROR();
             }
         }
+#endif
+    }
+    else if (p1 == 0x1 && p2 == 0xff) { // PHY Reset
+#ifndef ENABLE_EMULATION
+        memset(&phy_data, 0, sizeof(phy_data_t));
+        if (phy_save() != PICOKEY_OK) {
+            return SW_EXEC_ERROR();
+        }
+        phy_load();
 #endif
     }
     else if (p1 == 0x2) { // SET TIME
