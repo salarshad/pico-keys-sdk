@@ -17,7 +17,8 @@
 
 include(pico-keys-sdk/cmake/version.cmake OPTIONAL)
 
-option(VIDPID "Set specific VID/PID from a known platform {NitroHSM, NitroFIDO2, NitroStart, NitroPro, Nitro3, Yubikey5, YubikeyNeo, YubiHSM, Gnuk, GnuPG}" "None")
+set(VIDPID "None" CACHE STRING "Set specific VID/PID from a known platform {NitroHSM, NitroFIDO2, NitroStart, NitroPro, Nitro3, Yubikey5, YubikeyNeo, YubiHSM, Gnuk, GnuPG}")
+set_property(CACHE VIDPID PROPERTY STRINGS None NitroHSM NitroFIDO2 NitroStart NitroPro Nitro3 Yubikey5 YubikeyNeo YubiHSM Gnuk GnuPG)
 
 message(STATUS "VIDPID:\t\t\t '${VIDPID}'")
 
@@ -339,6 +340,7 @@ set(PICO_KEYS_SOURCES ${PICO_KEYS_SOURCES}
 
 if(ESP_PLATFORM)
     set(PICO_KEYS_SOURCES ${PICO_KEYS_SOURCES}
+        ${CMAKE_CURRENT_LIST_DIR}/src/led/led_apa102.c
         ${CMAKE_CURRENT_LIST_DIR}/src/led/led_neopixel.c
         ${CMAKE_CURRENT_LIST_DIR}/src/led/led_pico.c
     )

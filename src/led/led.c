@@ -92,6 +92,7 @@ extern led_driver_t led_driver_cyw43;
 extern led_driver_t led_driver_ws2812;
 extern led_driver_t led_driver_neopixel;
 extern led_driver_t led_driver_pimoroni;
+extern led_driver_t led_driver_apa102;
 
 void led_driver_init_dummy() {
     // Do nothing
@@ -113,7 +114,13 @@ void led_init() {
     led_driver = &led_driver_dummy;
 #if defined(PICO_PLATFORM) || defined(ESP_PLATFORM)
     // Guess default driver
-#if defined(PIMORONI_TINY2040) || defined(PIMORONI_TINY2350)
+#if defined(PICO_BOARD_TDONGLE_S3) && defined(ESP_PLATFORM)
+    led_driver = &led_driver_apa102;
+    phy_data.led_driver = PHY_LED_DRIVER_APA102;
+    phy_data.led_gpio = 40;
+    phy_data.led_driver_present = true;
+    phy_data.led_gpio_present = true;
+#elif defined(PIMORONI_TINY2040) || defined(PIMORONI_TINY2350)
     led_driver = &led_driver_pimoroni;
     phy_data.led_driver = phy_data.led_driver_present ? phy_data.led_driver : PHY_LED_DRIVER_PIMORONI;
     phy_data.led_gpio = phy_data.led_gpio_present ? phy_data.led_gpio : PICO_DEFAULT_LED_PIN;
@@ -143,6 +150,7 @@ void led_init() {
     phy_data.led_driver = phy_data.led_driver_present ? phy_data.led_driver : PHY_LED_DRIVER_PICO;
     phy_data.led_gpio = phy_data.led_gpio_present ? phy_data.led_gpio : PICO_DEFAULT_LED_PIN;
 #endif
+#if !defined(PICO_BOARD_TDONGLE_S3) || !defined(ESP_PLATFORM)
     if (phy_data.led_driver_present) {
         switch (phy_data.led_driver & 15) {
             case PHY_LED_DRIVER_PICO:
@@ -151,6 +159,9 @@ void led_init() {
 #ifdef ESP_PLATFORM
             case PHY_LED_DRIVER_NEOPIXEL:
                 led_driver = &led_driver_neopixel;
+                break;
+            case PHY_LED_DRIVER_APA102:
+                led_driver = &led_driver_apa102;
                 break;
 #else
 #ifdef CYW43_WL_GPIO_LED_PIN
@@ -169,6 +180,7 @@ void led_init() {
                 break;
         }
     }
+#endif
     phy_data.led_driver_present = true;
     phy_data.led_gpio_present = true;
     led_driver->init();
