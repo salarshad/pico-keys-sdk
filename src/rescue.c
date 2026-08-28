@@ -70,6 +70,9 @@ const uint8_t PICO_MCU = 0;
 #ifndef PICOKEYS_DEVICE_KEY_CURVE
 #define PICOKEYS_DEVICE_KEY_CURVE MBEDTLS_ECP_DP_SECP256K1
 #endif
+#ifndef PICOKEYS_OTP_BOOTKEY_SLOTS
+#define PICOKEYS_OTP_BOOTKEY_SLOTS 4
+#endif
 
 #define EF_DEVCERT_KEY 0xE0C1
 #define DEVCERT_KEY_FORMAT_GCM 0x01
@@ -465,7 +468,7 @@ static int cmd_secure(void) {
     }
 
     uint8_t bootkey = P1(apdu);
-    if (bootkey >= 6) {
+    if (bootkey >= PICOKEYS_OTP_BOOTKEY_SLOTS) {
         return SW_INCORRECT_P1P2();
     }
     bool secure_lock = P2(apdu) == 0x1;
