@@ -20,6 +20,11 @@ set(PICOKEYS_REQUIRES
     cjson
 )
 
+# Generated device configuration header, when the application provides one.
+if(PICOKEYS_DEVICE_CONFIG_INCLUDE_DIR)
+    list(APPEND PICOKEYS_INCLUDE_DIRS ${PICOKEYS_DEVICE_CONFIG_INCLUDE_DIR})
+endif()
+
 if(ENABLE_PQC)
     list(APPEND PICOKEYS_INCLUDE_DIRS
         ${PICOKEYS_SDK_DIR}/third-party/mlkem/mlkem

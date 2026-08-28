@@ -28,13 +28,52 @@
 #include "random.h"
 #include "mbedtls/ecdsa.h"
 
-#define OTP_OLD_MKEK_ROW 0xEF0
-#define OTP_OLD_DEVK_ROW 0xED0
-#define OTP_MKEK_ROW     0xE90
-#define OTP_DEVK_ROW     0xE80
+/* Generated from the application's device configuration file when one is
+ * available (see config/device_config.cmake); the defaults below keep the SDK
+ * buildable on its own. */
+#if defined(__has_include)
+#if __has_include("picokeys_device_config.h")
+#include "picokeys_device_config.h"
+#endif
+#endif
+
+#ifndef PICOKEYS_OTP_OLD_MKEK_ROW
+#define PICOKEYS_OTP_OLD_MKEK_ROW 0xEF0
+#endif
+#ifndef PICOKEYS_OTP_OLD_DEVK_ROW
+#define PICOKEYS_OTP_OLD_DEVK_ROW 0xED0
+#endif
+#ifndef PICOKEYS_OTP_MKEK_ROW
+#define PICOKEYS_OTP_MKEK_ROW     0xE90
+#endif
+#ifndef PICOKEYS_OTP_DEVK_ROW
+#define PICOKEYS_OTP_DEVK_ROW     0xE80
+#endif
+#ifndef PICOKEYS_OTP_BOOTKEY_HASH
+#define PICOKEYS_OTP_BOOTKEY_HASH { \
+    0xE1, 0xD1, 0x6B, 0xA7, 0x64, 0xAB, 0xD7, 0x12, \
+    0xD4, 0xEF, 0x6E, 0x3E, 0xDD, 0x74, 0x4E, 0xD5, \
+    0x63, 0x8C, 0x26, 0x0B, 0x77, 0x1C, 0xF9, 0x81, \
+    0x51, 0x11, 0x0B, 0xAF, 0xAC, 0x9B, 0xC8, 0x71 }
+#endif
+#ifndef PICOKEYS_OTP_BOOTKEY_SLOTS
+#define PICOKEYS_OTP_BOOTKEY_SLOTS 6
+#endif
+#ifndef PICOKEYS_DEVICE_KEY_CURVE
+#define PICOKEYS_DEVICE_KEY_CURVE MBEDTLS_ECP_DP_SECP256K1
+#endif
+
+#define OTP_OLD_MKEK_ROW PICOKEYS_OTP_OLD_MKEK_ROW
+#define OTP_OLD_DEVK_ROW PICOKEYS_OTP_OLD_DEVK_ROW
+#define OTP_MKEK_ROW     PICOKEYS_OTP_MKEK_ROW
+#define OTP_DEVK_ROW     PICOKEYS_OTP_DEVK_ROW
 
 #define OTP_KEY_1    OTP_MKEK_ROW
 #define OTP_KEY_2    OTP_DEVK_ROW
+
+/* SHA-256 fingerprint of the firmware signing public key, as held in an OTP
+ * BOOTKEY slot. It must match the key given to CMake as SECURE_BOOT_PKEY. */
+alignas(4) static const uint8_t otp_bootkey_hash[32] = PICOKEYS_OTP_BOOTKEY_HASH;
 
 
 static bool is_empty_buffer(const_byte_array_t buffer) {
@@ -152,20 +191,14 @@ bool otp_platform_is_secure_boot_enabled(uint8_t *bootkey) {
     if ((crit1[0] & (1 << OTP_DATA_CRIT1_SECURE_BOOT_ENABLE_LSB)) == 0) {
         return false;
     }
-    alignas(2) uint8_t BOOTKEY[32] = {
-        0xE1, 0xD1, 0x6B, 0xA7, 0x64, 0xAB, 0xD7, 0x12,
-        0xD4, 0xEF, 0x6E, 0x3E, 0xDD, 0x74, 0x4E, 0xD5,
-        0x63, 0x8C, 0x26, 0x0B, 0x77, 0x1C, 0xF9, 0x81,
-        0x51, 0x11, 0x0B, 0xAF, 0xAC, 0x9B, 0xC8, 0x71
-    };
     uint8_t bootkey_idx = 0;
-    for (; bootkey_idx < 6; bootkey_idx++) {
+    for (; bootkey_idx < PICOKEYS_OTP_BOOTKEY_SLOTS; bootkey_idx++) {
         const uint8_t *bootkey_row = otp_buffer(OTP_DATA_BOOTKEY0_0_ROW + 0x10 * bootkey_idx);
-        if (memcmp(bootkey_row, BOOTKEY, sizeof(BOOTKEY)) == 0) {
+        if (memcmp(bootkey_row, otp_bootkey_hash, sizeof(otp_bootkey_hash)) == 0) {
             break;
         }
     }
-    if (bootkey_idx == 6) {
+    if (bootkey_idx == PICOKEYS_OTP_BOOTKEY_SLOTS) {
         return false;
     }
     const uint8_t *boot_flags1 = otp_buffer(OTP_DATA_BOOT_FLAGS1_ROW);
@@ -200,13 +233,12 @@ bool otp_platform_is_secure_boot_locked(void) {
 int otp_platform_enable_secure_boot(uint8_t bootkey, bool secure_lock) {
     int ret = 0;
 
-    if (bootkey >= 6) {
+    if (bootkey >= PICOKEYS_OTP_BOOTKEY_SLOTS) {
         return PICOKEYS_WRONG_DATA;
     }
 
-    alignas(2) uint8_t BOOTKEY[] = "\xe1\xd1\x6b\xa7\x64\xab\xd7\x12\xd4\xef\x6e\x3e\xdd\x74\x4e\xd5\x63\x8c\x26\xb\x77\x1c\xf9\x81\x51\x11\xb\xaf\xac\x9b\xc8\x71";
     if (is_empty_otp_buffer(OTP_DATA_BOOTKEY0_0_ROW + 0x10*bootkey, 32)) {
-        PICOKEYS_CHECK(otp_write_data(OTP_DATA_BOOTKEY0_0_ROW + 0x10*bootkey, CONST_BYTE_ARRAY(BOOTKEY, sizeof(BOOTKEY))));
+        PICOKEYS_CHECK(otp_write_data(OTP_DATA_BOOTKEY0_0_ROW + 0x10*bootkey, CONST_BYTE_ARRAY(otp_bootkey_hash, sizeof(otp_bootkey_hash))));
     }
 
     const uint8_t *boot_flags1 = otp_buffer_raw(OTP_DATA_BOOT_FLAGS1_ROW);
@@ -278,7 +310,7 @@ void otp_platform_init(const uint8_t **otp_key_1_out, const uint8_t **otp_key_2_
         uint8_t pkey[MBEDTLS_ECP_MAX_BYTES];
         while (olen != 32) {
             mbedtls_ecdsa_init(&ecdsa);
-            mbedtls_ecp_group_id ec_id = MBEDTLS_ECP_DP_SECP256K1;
+            mbedtls_ecp_group_id ec_id = PICOKEYS_DEVICE_KEY_CURVE;
             mbedtls_ecdsa_genkey(&ecdsa, ec_id, random_fill_iterator, NULL);
             mbedtls_ecp_write_key_ext(&ecdsa, &olen, pkey, sizeof(pkey));
             mbedtls_ecdsa_free(&ecdsa);

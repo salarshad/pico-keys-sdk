@@ -30,8 +30,8 @@
 #include "mbedtls/sha256.h"
 
 #define CF_SAFE_RELEASE(x) do { if ((x) != NULL) CFRelease(x); } while (0)
-#define SE_KEY_TAG "com.picokeys.novus.se.key"
-#define LOCAL_KEY_TAG "com.picokeys.novus.local.ecdh.key"
+#define SE_KEY_TAG "com.carekeys.carepk.se.key"
+#define LOCAL_KEY_TAG "com.carekeys.carepk.local.ecdh.key"
 
 static int sec_err(const char *ctx, OSStatus st) {
     fprintf(stderr, "[macos-se] %s failed: OSStatus=%d\n", ctx, (int)st);
@@ -43,7 +43,7 @@ static int derive_secp256k1_privkey_from_secret(const_byte_array_t secret_data, 
     size_t secret_len = secret_data.len;
     int rc = -1;
     uint8_t digest[32];
-    const uint8_t label[] = "pico-novus/se-ecdh-to-k1-v1";
+    const uint8_t label[] = "pico-carepk/se-ecdh-to-k1-v1";
     mbedtls_ecp_group grp;
     mbedtls_mpi x, n_minus_1;
 

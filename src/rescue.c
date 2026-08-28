@@ -59,6 +59,18 @@ const uint8_t PICO_MCU = 4;
 const uint8_t PICO_MCU = 0;
 #endif
 
+/* Generated from the application's device configuration file when one is
+ * available (see config/device_config.cmake); the default keeps the SDK
+ * buildable on its own. */
+#if defined(__has_include)
+#if __has_include("picokeys_device_config.h")
+#include "picokeys_device_config.h"
+#endif
+#endif
+#ifndef PICOKEYS_DEVICE_KEY_CURVE
+#define PICOKEYS_DEVICE_KEY_CURVE MBEDTLS_ECP_DP_SECP256K1
+#endif
+
 #define EF_DEVCERT_KEY 0xE0C1
 #define DEVCERT_KEY_FORMAT_GCM 0x01
 #define DEVCERT_KEY_PLAIN_SIZE 32
@@ -197,7 +209,7 @@ int rescue_migrate_keydev(void) {
 
     mbedtls_ecp_keypair ecp;
     mbedtls_ecp_keypair_init(&ecp);
-    int ret = load_internal_keydev(&ecp, MBEDTLS_ECP_DP_SECP256K1);
+    int ret = load_internal_keydev(&ecp, PICOKEYS_DEVICE_KEY_CURVE);
     mbedtls_ecp_keypair_free(&ecp);
     return ret == PICOKEYS_OK ? PICOKEYS_OK : PICOKEYS_EXEC_ERROR;
 }
@@ -227,7 +239,7 @@ static int cmd_keydev_sign(void) {
         }
         mbedtls_ecp_keypair ecp;
         mbedtls_ecp_keypair_init(&ecp);
-        mbedtls_ecp_group_id ec_id = MBEDTLS_ECP_DP_SECP256K1;
+        mbedtls_ecp_group_id ec_id = PICOKEYS_DEVICE_KEY_CURVE;
         if (!otp_key_2) {
             int ret = load_internal_keydev(&ecp, ec_id);
             if (ret != PICOKEYS_OK) {
@@ -268,7 +280,7 @@ static int cmd_keydev_sign(void) {
         }
         mbedtls_ecp_keypair ecp;
         mbedtls_ecp_keypair_init(&ecp);
-        mbedtls_ecp_group_id ec_id = MBEDTLS_ECP_DP_SECP256K1;
+        mbedtls_ecp_group_id ec_id = PICOKEYS_DEVICE_KEY_CURVE;
         if (!otp_key_2) {
             int ret = load_internal_keydev(&ecp, ec_id);
             if (ret != PICOKEYS_OK) {
