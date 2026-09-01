@@ -42,7 +42,7 @@ extern bool low_flash_commit_sync(uint32_t timeout_ms);
 /*
  * ------------------------------------------------------
  * |                                                    |
- * | next_addr | prev_addr | fid | len16 | payload       | legacy
+ * | next_addr | prev_addr | fid | len16 | payload      | legacy
  * | next_addr | prev_addr | fid | FFFF  | len32 | data | extended
  * |                                                    |
  * ------------------------------------------------------
@@ -82,15 +82,16 @@ static size_t flash_record_size(uintptr_t base) {
     return 2 * sizeof(uintptr_t) + sizeof(uint16_t) + flash_record_length_size(base) + flash_record_payload_size(base);
 }
 
-static uintptr_t allocate_free_addr(uint32_t size, bool persistent) {
+static uintptr_t allocate_free_addr(uint32_t size, bool persistent, uintptr_t *publish_at) {
     size_t length_size = size >= FLASH_FILE_EXTENDED_LENGTH ? FLASH_FILE_EXTENDED_LENGTH_SIZE : FLASH_FILE_LEGACY_LENGTH_SIZE;
     size_t overhead = 2 * sizeof(uintptr_t) + sizeof(uint16_t) + length_size;
     size_t real_size = 0;
     uintptr_t next_base = 0x0, endp = end_data_pool, startp = start_data_pool;
 
-    if (size > SIZE_MAX - overhead) {
+    if (!publish_at || size > SIZE_MAX - overhead) {
         return 0x0;
     }
+    *publish_at = 0x0;
     real_size = overhead + size;
     if (persistent) {
         endp = end_rom_pool;
@@ -107,7 +108,6 @@ static uintptr_t allocate_free_addr(uint32_t size, bool persistent) {
         next_base = flash_read_uintptr(base);
 
         uintptr_t gap_start = startp;
-        bool gap_reusable = true;
         if (next_base != 0x0) {
             if (next_base >= base) {
                 return 0x0;
@@ -117,16 +117,21 @@ static uintptr_t allocate_free_addr(uint32_t size, bool persistent) {
                 return 0x0;
             }
             gap_start = next_base + next_size;
-            gap_reusable = (flash_read_uint16(next_base + 2 * sizeof(uintptr_t)) & 0x1000) != 0x1000;
         }
 
-        if (gap_reusable && potential_addr >= gap_start && potential_addr >= startp) {
-            flash_program_uintptr(potential_addr, next_base);
-            flash_program_uintptr(potential_addr + sizeof(uintptr_t), base);
-            if (next_base != 0x0) {
-                flash_program_uintptr(next_base + sizeof(uintptr_t), potential_addr);
+        /* Cleared records are unlinked and zeroed, so every gap is reusable. */
+        if (potential_addr >= gap_start && potential_addr >= startp) {
+            int r = flash_program_uintptr(potential_addr, next_base);
+            if (r == PICOKEYS_OK) {
+                r = flash_program_uintptr(potential_addr + sizeof(uintptr_t), base);
             }
-            flash_program_uintptr(base, potential_addr);
+            if (r == PICOKEYS_OK && next_base != 0x0) {
+                r = flash_program_uintptr(next_base + sizeof(uintptr_t), potential_addr);
+            }
+            if (r != PICOKEYS_OK) {
+                return 0x0;
+            }
+            *publish_at = base;
             return potential_addr;
         }
         if (next_base == 0x0) {
@@ -155,7 +160,7 @@ static int copy_file_range(const file_t *source, uint32_t source_offset, uintptr
     uint8_t buffer[256];
 
     while (len > 0) {
-        size_t chunk = MIN(sizeof(buffer), len);
+        uint32_t chunk = MIN((uint32_t)sizeof(buffer), len);
         int r = file_read_at(source, source_offset, BYTE_ARRAY(buffer, chunk));
         if (r != PICOKEYS_OK) {
             return r;
@@ -205,7 +210,8 @@ static int flash_write_data_to_file_internal(file_t *file, const_byte_array_t da
 
     file_t old_file = *file;
     bool replacing = old_file.data != NULL;
-    uintptr_t new_addr = allocate_free_addr(new_size, (file_get_type(file) & FILE_PERSISTENT) == FILE_PERSISTENT);
+    uintptr_t publish_at = 0x0;
+    uintptr_t new_addr = allocate_free_addr(new_size, (file_get_type(file) & FILE_PERSISTENT) == FILE_PERSISTENT, &publish_at);
     if (new_addr == 0x0) {
         return PICOKEYS_ERR_NO_MEMORY;
     }
@@ -235,8 +241,12 @@ static int flash_write_data_to_file_internal(file_t *file, const_byte_array_t da
     if (r == PICOKEYS_OK && partial && replacing && write_end < old_size) {
         r = copy_file_range(&old_file, write_end, payload + write_end, old_size - write_end);
     }
-    if (r == PICOKEYS_OK && 2 * sizeof(uintptr_t) + sizeof(uint16_t) + length_size + new_size > FLASH_SECTOR_SIZE && !flash_commit_sync(5000u)) {
+    /* Publish only after the record is complete; across sectors the record must be durable first. */
+    if (r == PICOKEYS_OK && (publish_at & ~(uintptr_t)(FLASH_SECTOR_SIZE - 1)) != (new_addr & ~(uintptr_t)(FLASH_SECTOR_SIZE - 1)) && !flash_commit_sync(5000u)) {
         r = PICOKEYS_ERR_MEMORY_FATAL;
+    }
+    if (r == PICOKEYS_OK) {
+        r = flash_program_uintptr(publish_at, new_addr);
     }
     if (r != PICOKEYS_OK) {
         flash_clear_file(&new_file);

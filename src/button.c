@@ -20,6 +20,7 @@
 #include "led/led.h"
 #include "pico_time.h"
 #if defined(PICO_PLATFORM)
+#include "pico/multicore.h"
 #include "hardware/sync.h"
 #include "hardware/structs/ioqspi.h"
 #include "hardware/gpio.h"
@@ -34,6 +35,13 @@ extern void execute_tasks(void);
 int (*button_pressed_cb)(uint8_t) = NULL;
 
 static bool req_button_pending = false;
+#ifndef ENABLE_EMULATION
+static bool async_button_wait = false;
+static bool async_button_pressed = false;
+static uint32_t async_button_started = 0;
+static uint32_t async_button_timeout = 0;
+static uint32_t async_button_led_mode = MODE_MOUNTED;
+#endif
 
 bool is_req_button_pending(void) {
     return req_button_pending;
@@ -95,18 +103,21 @@ static bool picok_board_button_read(void) {
 static bool button_pressed_state = false;
 static uint32_t button_pressed_time = 0;
 static uint8_t button_press = 0;
+static bool button_hold_state = false;
+static uint32_t button_hold_started = 0;
+static uint32_t button_last_poll = 0;
+volatile uint32_t button_pressed_duration = 0;
 
-int button_wait(void) {
+void button_wait_start(void) {
     /* Disabled by default. As LED may not be properly configured,
        it will not be possible to indicate button press unless it
        is commissioned. */
-    uint32_t button_timeout = 0;
-    if (phy_data.up_btn_present) {
-        button_timeout = phy_data.up_btn * 1000;
-    }
+    uint32_t button_timeout = phy_data.up_btn_present ? phy_data.up_btn * 1000 : 0;
     if (button_timeout == 0 && !force_button_wait) {
         signal_emit(SIGNAL_USER_PRESENCE_COMPLETED);
-        return 0;
+        uint32_t flag = EV_BUTTON_PRESSED;
+        queue_try_add(&usb_to_card_q, &flag);
+        return;
     }
     if (button_timeout == 0) {
         button_timeout = 30000;
@@ -115,76 +126,111 @@ int button_wait(void) {
         .timeout = button_timeout / 1000,
     };
     signal_emit_param(SIGNAL_USER_PRESENCE_REQUEST, &data);
-    uint32_t start_button = board_millis();
-    const uint32_t button_poll_interval_ms = 2;
-    uint32_t next_button_poll_ms = start_button;
-    bool button_pressed = picok_board_button_read();
-    bool timeout = false;
     cancel_button = false;
-    uint32_t led_mode = led_get_mode();
-    led_set_mode(MODE_BUTTON);
+    async_button_wait = true;
+    async_button_pressed = picok_board_button_read();
+    async_button_started = board_millis();
+    async_button_timeout = button_timeout;
+    async_button_led_mode = led_get_mode();
     req_button_pending = true;
-    while (button_pressed == false && cancel_button == false) {
-        execute_tasks();
-        uint32_t now = board_millis();
-        if (now >= next_button_poll_ms) {
-            button_pressed = picok_board_button_read();
-            next_button_poll_ms = now + button_poll_interval_ms;
-        }
-        //sleep_ms(10);
-        if (start_button + button_timeout < now) { /* timeout */
-            timeout = true;
-            break;
-        }
-    }
-    if (!timeout) {
-        while (button_pressed == true && cancel_button == false) {
-            execute_tasks();
-            uint32_t now = board_millis();
-            if (now >= next_button_poll_ms) {
-                button_pressed = picok_board_button_read();
-                next_button_poll_ms = now + button_poll_interval_ms;
-            }
-            //sleep_ms(10);
-            if (start_button + 15000 < now) { /* timeout */
-                timeout = true;
-                break;
-            }
-        }
-    }
-    led_set_mode(led_mode);
-    req_button_pending = false;
-    if (timeout) {
-        signal_emit(SIGNAL_USER_PRESENCE_TIMEOUT);
-        return 1;
-    }
-    else if (cancel_button) {
-        signal_emit(SIGNAL_USER_PRESENCE_CANCELLED);
-        return 2;
-    }
-    signal_emit(SIGNAL_USER_PRESENCE_COMPLETED);
-    return 0;
+    led_set_mode(MODE_BUTTON);
 }
+
+void button_wait_poll(void) {
+    if (!async_button_wait) {
+        return;
+    }
+    bool pressed = picok_board_button_read();
+    uint32_t now = board_millis();
+    if (!async_button_pressed && pressed) {
+        async_button_pressed = true;
+    }
+    button_event_t result = BUTTON_EV_NONE;
+    if (cancel_button) {
+        result = BUTTON_EV_CANCELLED;
+    }
+    else if (async_button_started + async_button_timeout < now || (async_button_pressed && async_button_started + 15000 < now)) {
+        result = BUTTON_EV_TIMEOUT;
+    }
+    else if (async_button_pressed && !pressed) {
+        result = BUTTON_EV_PRESSED;
+    }
+    if (result == BUTTON_EV_NONE) {
+        return;
+    }
+    async_button_wait = false;
+    req_button_pending = false;
+    led_set_mode(async_button_led_mode);
+    uint32_t flag = 0;
+    if (result == BUTTON_EV_PRESSED) {
+        flag = EV_BUTTON_PRESSED;
+    }
+    else if (result == BUTTON_EV_TIMEOUT) {
+        flag = EV_BUTTON_TIMEOUT;
+    }
+    else if (result == BUTTON_EV_CANCELLED) {
+        flag = EV_BUTTON_CANCELLED;
+    }
+    queue_try_add(&usb_to_card_q, &flag);
+    if (result == BUTTON_EV_PRESSED) {
+        signal_emit(SIGNAL_USER_PRESENCE_COMPLETED);
+    }
+    else if (result == BUTTON_EV_TIMEOUT) {
+        signal_emit(SIGNAL_USER_PRESENCE_TIMEOUT);
+    }
+    else {
+        signal_emit(SIGNAL_USER_PRESENCE_CANCELLED);
+    }
+}
+
 #endif
 
 void button_task(void) {
 #ifndef ENABLE_EMULATION
-    if (button_pressed_cb && board_millis() > 1000 && !is_busy()) { // wait 1 second to boot up
-        bool current_button_state = picok_board_button_read();
-        if (current_button_state != button_pressed_state) {
-            if (current_button_state == false) { // unpressed
-                if (button_pressed_time == 0 || button_pressed_time + 1000 > board_millis()) {
-                    button_press++;
-                }
-                button_pressed_time = board_millis();
-            }
-            button_pressed_state = current_button_state;
+    uint32_t now = board_millis();
+    if (now > 1000 && now - button_last_poll >= 10 && (async_button_wait || !is_busy())) { // wait 1 second to boot up
+#ifdef PICO_PLATFORM
+        if (!multicore_lockout_start_timeout_us(1000)) {
+            return;
         }
-        if (button_pressed_time > 0 && button_press > 0 && button_pressed_time + 1000 < board_millis() && button_pressed_state == false) {
-            if (button_pressed_cb != NULL) {
-                (*button_pressed_cb)(button_press);
+#endif
+        bool current_button_state = picok_board_button_read();
+#ifdef PICO_PLATFORM
+        multicore_lockout_end_timeout_us(1000);
+#endif
+        button_last_poll = now;
+        if (async_button_wait) {
+            button_wait_poll();
+            return;
+        }
+        if (current_button_state && !button_hold_state) {
+            button_hold_started = now;
+            button_pressed_duration = 0;
+        }
+        else if (!current_button_state && button_hold_state) {
+            button_pressed_duration = button_hold_started == 0 ? 0 : now - button_hold_started;
+            button_hold_started = 0;
+        }
+        else if (current_button_state && button_hold_state && button_hold_started != 0) {
+            button_pressed_duration = now - button_hold_started;
+        }
+        button_hold_state = current_button_state;
+        if (button_pressed_cb) {
+            if (current_button_state != button_pressed_state) {
+                if (current_button_state == false) { // unpressed
+                    if (button_pressed_time == 0 || button_pressed_time + 1000 > now) {
+                        button_press++;
+                    }
+                    button_pressed_time = now;
+                }
+                button_pressed_state = current_button_state;
             }
-            button_pressed_time = button_press = 0;
+            if (button_pressed_time > 0 && button_press > 0 && button_pressed_time + 1000 < now && button_pressed_state == false) {
+                if (button_pressed_cb != NULL) {
+                    (*button_pressed_cb)(button_press);
+                }
+                button_pressed_time = button_press = 0;
+            }
         }
     }
 #endif

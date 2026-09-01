@@ -15,10 +15,19 @@ set(PICOKEYS_REQUIRES
     esp_tinyusb
     efuse
     mbedtls
-    tinycbor
-    lwip
-    cjson
 )
+if(USB_ITF_HID)
+    list(APPEND PICOKEYS_REQUIRES
+        tinycbor
+    )
+endif()
+
+if (USB_ITF_LWIP)
+    list(APPEND PICOKEYS_REQUIRES
+        lwip
+        cjson
+    )
+endif()
 
 # Generated device configuration header, when the application provides one.
 if(PICOKEYS_DEVICE_CONFIG_INCLUDE_DIR)

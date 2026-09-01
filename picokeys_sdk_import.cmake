@@ -170,6 +170,11 @@ set(MBEDTLS_SOURCES
     ${CMAKE_CURRENT_LIST_DIR}/third-party/mbedtls/library/pk.c
     ${CMAKE_CURRENT_LIST_DIR}/third-party/mbedtls/library/pk_wrap.c
     ${CMAKE_CURRENT_LIST_DIR}/third-party/mbedtls/library/pkwrite.c
+    ${CMAKE_CURRENT_LIST_DIR}/third-party/mbedtls/library/x509.c
+    ${CMAKE_CURRENT_LIST_DIR}/third-party/mbedtls/library/x509_crt.c
+    ${CMAKE_CURRENT_LIST_DIR}/third-party/mbedtls/library/pkparse.c
+    ${CMAKE_CURRENT_LIST_DIR}/third-party/mbedtls/library/pk_ecc.c
+    ${CMAKE_CURRENT_LIST_DIR}/third-party/mbedtls/library/pkcs12.c
 )
 
 if(ENABLE_EDDSA)
@@ -315,6 +320,7 @@ list(APPEND PICOKEYS_SOURCES
     ${CMAKE_CURRENT_LIST_DIR}/src/main.c
     ${CMAKE_CURRENT_LIST_DIR}/src/usb/usb.c
     ${CMAKE_CURRENT_LIST_DIR}/src/fs/file.c
+    ${CMAKE_CURRENT_LIST_DIR}/src/fs/vault_container.c
     ${CMAKE_CURRENT_LIST_DIR}/src/fs/object_store.c
     ${CMAKE_CURRENT_LIST_DIR}/src/fs/object_store_txn.c
     ${CMAKE_CURRENT_LIST_DIR}/src/fs/object_container.c
@@ -337,6 +343,7 @@ list(APPEND PICOKEYS_SOURCES
     ${CMAKE_CURRENT_LIST_DIR}/src/button.c
     ${CMAKE_CURRENT_LIST_DIR}/src/led/led.c
     ${CMAKE_CURRENT_LIST_DIR}/src/signal.c
+    ${CMAKE_CURRENT_LIST_DIR}/src/vault.c
 )
 
 if(ESP_PLATFORM)
@@ -669,9 +676,6 @@ endif()
 if(PICO_RP2350)
     pico_set_uf2_family(${CMAKE_PROJECT_NAME} "rp2350-arm-s")
     pico_embed_pt_in_binary(${CMAKE_PROJECT_NAME} "${CMAKE_CURRENT_LIST_DIR}/config/rp2350/pt.json")
-    if(NOT IS_CYW43)
-        pico_set_binary_type(${CMAKE_PROJECT_NAME} copy_to_ram)
-    endif()
     if(SECURE_BOOT_PKEY)
         message(STATUS "Secure Boot Key ${SECURE_BOOT_PKEY}")
         pico_sign_binary(${CMAKE_PROJECT_NAME} ${SECURE_BOOT_PKEY})

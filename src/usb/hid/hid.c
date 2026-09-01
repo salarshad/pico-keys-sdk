@@ -31,6 +31,7 @@ static portMUX_TYPE mutex = portMUX_INITIALIZER_UNLOCKED;
 #include "picokeys_version.h"
 #include "apdu.h"
 #include "usb.h"
+#include "button.h"
 
 extern void init_fido(void);
 bool is_nk = false;
@@ -215,7 +216,7 @@ static void send_hid_report(uint8_t report_id) {
 
 void tud_hid_report_complete_cb(uint8_t instance, uint8_t const *report, uint16_t len) {
     //printf("report_complete %d %d %d\n", instance, len, send_buffer_size[instance]);
-    if (instance == ITF_HID_CTAP && len > 0) {
+    if (instance == ITF_HID_CTAP && len == 64) {
 #ifdef ESP_PLATFORM
         taskENTER_CRITICAL(&mutex);
 #endif
@@ -256,18 +257,22 @@ void tud_hid_report_complete_cb(uint8_t instance, uint8_t const *report, uint16_
 }
 
 int driver_write_hid(uint8_t itf, const_byte_array_t buffer) {
+    if ((!buffer.data && buffer.len > 0) || buffer.len > UINT16_MAX) {
+        return 0;
+    }
+    uint16_t buffer_len = (uint16_t)buffer.len;
     if (last_write_result[itf] == WRITE_PENDING) {
         return 0;
     }
-    bool r = tud_hid_n_report(itf, 0, buffer.data, buffer.len);
+    bool r = tud_hid_n_report(itf, 0, buffer.data, buffer_len);
     last_write_result[itf] = r ? WRITE_PENDING : WRITE_FAILED;
     if (last_write_result[itf] == WRITE_FAILED) {
         return 0;
     }
 #ifdef ENABLE_EMULATION
-    tud_hid_report_complete_cb(ITF_HID_CTAP, buffer.data, buffer.len);
+    tud_hid_report_complete_cb(ITF_HID_CTAP, buffer.data, buffer_len);
 #endif
-    return MIN(64, buffer.len);
+    return buffer_len > 64 ? 64 : buffer_len;
 }
 
 int (*hid_set_report_cb)(uint8_t, uint8_t, hid_report_type_t, uint8_t const *, uint16_t) = NULL;
@@ -312,9 +317,21 @@ uint8_t last_cmd = 0;
 uint8_t last_seq = 0;
 CTAPHID_FRAME last_req = { 0 };
 uint32_t lock = 0;
+uint32_t lock_cid = 0;
+static uint32_t next_cid = 1;
+
+static uint32_t allocate_cid(void) {
+    uint32_t cid;
+    do {
+        cid = next_cid++;
+        if (next_cid == 0 || next_cid == CID_BROADCAST) {
+            next_cid = 1;
+        }
+    } while (cid == 0 || cid == CID_BROADCAST);
+    return cid;
+}
 
 uint8_t thread_type = 0; //1 is APDU, 2 is CBOR
-extern volatile bool cancel_button;
 extern int cbor_process(uint8_t last_cmd, const uint8_t *data, size_t len);
 static uint32_t last_keepalive_time = 0;
 
@@ -353,8 +370,8 @@ int driver_process_usb_packet_hid(uint16_t read) {
             (ctap_req->cid == CID_BROADCAST && (FRAME_TYPE(ctap_req) != TYPE_INIT || ctap_req->init.cmd != CTAPHID_INIT))) {
             return ctap_error(CTAP1_ERR_INVALID_CHANNEL);
         }
-        if (board_millis() < lock && ctap_req->cid != last_req.cid &&
-            last_cmd_time + 100 > board_millis()) {
+        if (board_millis() < lock && ctap_req->cid != lock_cid &&
+            !(ctap_req->cid == CID_BROADCAST && ctap_req->init.cmd == CTAPHID_INIT)) {
             return ctap_error(CTAP1_ERR_CHANNEL_BUSY);
         }
         if (FRAME_TYPE(ctap_req) == TYPE_INIT && ctap_req->init.cmd == CTAPHID_CANCEL) {
@@ -427,7 +444,7 @@ int driver_process_usb_packet_hid(uint16_t read) {
             CTAPHID_INIT_REQ *req = (CTAPHID_INIT_REQ *) ctap_req->init.data;
             CTAPHID_INIT_RESP *resp = (CTAPHID_INIT_RESP *) ctap_resp->init.data;
             memcpy(resp->nonce, req->nonce, sizeof(resp->nonce));
-            resp->cid = 0x01000000;
+            resp->cid = ctap_req->cid == CID_BROADCAST ? allocate_cid() : ctap_req->cid;
             resp->versionInterface = CTAPHID_IF_VERSION;
             resp->versionMajor = get_version_major ? get_version_major() : PICOKEYS_SDK_VERSION_MAJOR;
             resp->versionMinor = get_version_minor ? get_version_minor() : PICOKEYS_SDK_VERSION_MINOR;
@@ -478,7 +495,17 @@ int driver_process_usb_packet_hid(uint16_t read) {
             if (ctap_req->init.data[0] > 10) {
                 return ctap_error(CTAP1_ERR_INVALID_PARAMETER);
             }
-            lock = board_millis() + ctap_req->init.data[0] * 1000;
+            if (board_millis() < lock && ctap_req->cid != lock_cid) {
+                return ctap_error(CTAP1_ERR_CHANNEL_BUSY);
+            }
+            if (ctap_req->init.data[0] == 0) {
+                lock = 0;
+                lock_cid = 0;
+            }
+            else {
+                lock = board_millis() + ctap_req->init.data[0] * 1000;
+                lock_cid = ctap_req->cid;
+            }
             ctap_resp->cid = ctap_req->cid;
             ctap_resp->init.cmd = ctap_req->init.cmd;
             driver_write_hid(ITF_HID_CTAP, CONST_BYTE_ARRAY((const uint8_t *)ctap_resp, 64));

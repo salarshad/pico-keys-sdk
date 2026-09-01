@@ -34,22 +34,34 @@ extern uint32_t timeout;
 bool is_chaining = false;
 uint8_t chain_buf[2038];
 uint8_t *chain_ptr = NULL;
+static uint8_t chain_header[4];
 
 struct apdu apdu;
 
 int process_apdu(void) {
+    bool is_select = INS(apdu) == 0xA4 && P1(apdu) == 0x04 && (P2(apdu) == 0x00 || P2(apdu) == 0x04);
     led_set_mode(MODE_PROCESSING);
     if (CLA(apdu) & 0x10) {
         size_t chain_used = 0;
         if (!is_chaining) {
             chain_ptr = chain_buf;
+            chain_header[0] = CLA(apdu) & (uint8_t)~0x10;
+            chain_header[1] = INS(apdu);
+            chain_header[2] = P1(apdu);
+            chain_header[3] = P2(apdu);
+        }
+        else if ((CLA(apdu) & (uint8_t)~0x10) != chain_header[0] || INS(apdu) != chain_header[1] || P1(apdu) != chain_header[2] || P2(apdu) != chain_header[3]) {
+            memset(chain_buf, 0, sizeof(chain_buf));
+            chain_ptr = NULL;
+            is_chaining = false;
+            return SW_LAST_CHAIN_EXPECTED();
         }
         chain_used = (size_t)(chain_ptr - chain_buf);
         if (chain_used + apdu.nc >= sizeof(chain_buf)) {
             memset(chain_buf, 0, sizeof(chain_buf));
             chain_ptr = NULL;
             is_chaining = false;
-            return SW_CLA_NOT_SUPPORTED();
+            return SW_WRONG_LENGTH();
         }
         memcpy(chain_ptr, apdu.data, apdu.nc);
         chain_ptr += apdu.nc;
@@ -58,12 +70,22 @@ int process_apdu(void) {
     }
     else {
         if (is_chaining) {
+            if (is_select || (CLA(apdu) & (uint8_t)~0x10) != chain_header[0] || INS(apdu) != chain_header[1] || P1(apdu) != chain_header[2] || P2(apdu) != chain_header[3]) {
+                memset(chain_buf, 0, sizeof(chain_buf));
+                chain_ptr = NULL;
+                is_chaining = false;
+                if (!is_select) {
+                    return SW_LAST_CHAIN_EXPECTED();
+                }
+            }
+        }
+        if (is_chaining) {
             size_t chain_used = (size_t)(chain_ptr - chain_buf);
             if (chain_used + apdu.nc >= sizeof(chain_buf)) {
                 memset(chain_buf, 0, sizeof(chain_buf));
                 chain_ptr = NULL;
                 is_chaining = false;
-                return SW_CLA_NOT_SUPPORTED();
+                return SW_WRONG_LENGTH();
             }
             memmove(apdu.data + chain_used, apdu.data, apdu.nc);
             memcpy(apdu.data, chain_buf, chain_used);
@@ -72,6 +94,9 @@ int process_apdu(void) {
             chain_ptr = NULL;
             is_chaining = false;
         }
+    }
+    if (!(CLA(apdu) & 0x10) && (CLA(apdu) & 0x0C)) {
+        return SW_CLA_NOT_SUPPORTED();
     }
     if (INS(apdu) == 0xA4 && P1(apdu) == 0x04 && (P2(apdu) == 0x00 || P2(apdu) == 0x4)) { //select by AID
         if (select_app(CONST_BYTE_ARRAY(apdu.data, apdu.nc)) == PICOKEYS_OK) {

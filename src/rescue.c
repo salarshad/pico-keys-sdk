@@ -135,7 +135,7 @@ static int encrypt_internal_keydev(file_t *ef_devcert_key, const uint8_t pkey[DE
 }
 
 static int decrypt_internal_keydev(file_t *ef_devcert_key, uint8_t pkey[DEVCERT_KEY_PLAIN_SIZE], bool *legacy) {
-    uint16_t record_len = file_get_size(ef_devcert_key);
+    uint32_t record_len = file_get_size(ef_devcert_key);
     const uint8_t *record = file_get_data(ef_devcert_key);
     uint8_t kbase[32] = { 0 };
     derive_kbase(kbase);
@@ -225,9 +225,13 @@ static bool rescue_require_user_presence(void) {
 #ifdef FORCE_BUTTON_WAIT
     force_button_wait = true;
 #endif
-    int ret = button_wait();
+    uint32_t event = EV_PRESS_BUTTON;
+    queue_add_blocking(&card_to_usb_q, &event);
+    do {
+        queue_remove_blocking(&usb_to_card_q, &event);
+    } while (event != EV_BUTTON_PRESSED && event != EV_BUTTON_TIMEOUT && event != EV_BUTTON_CANCELLED);
     force_button_wait = previous_force;
-    return ret == 0;
+    return event == EV_BUTTON_PRESSED;
 #endif
 }
 
