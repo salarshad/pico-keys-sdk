@@ -100,17 +100,40 @@ static bool vault_state_valid(void) {
     return vault_state.initialized && vault_state.layout && vault_state.primary.auth && vault_state.primary.protector;
 }
 
+/* Physical FID prefixes for the vault container's own records. Overridable so a
+ * product whose FID map already uses the default 0xc4-0xc9 range (e.g. pico-hsm)
+ * can relocate them without disturbing other products. These are local storage
+ * only; export/import blob compatibility does not depend on them. */
+#ifndef PICOKEYS_VAULT_MANIFEST_PREFIX_0
+#define PICOKEYS_VAULT_MANIFEST_PREFIX_0 0xc4u
+#endif
+#ifndef PICOKEYS_VAULT_MANIFEST_PREFIX_1
+#define PICOKEYS_VAULT_MANIFEST_PREFIX_1 0xc5u
+#endif
+#ifndef PICOKEYS_VAULT_WRAP_PREFIX_0
+#define PICOKEYS_VAULT_WRAP_PREFIX_0 0xc6u
+#endif
+#ifndef PICOKEYS_VAULT_WRAP_PREFIX_1
+#define PICOKEYS_VAULT_WRAP_PREFIX_1 0xc7u
+#endif
+#ifndef PICOKEYS_VAULT_LABEL_PREFIX_0
+#define PICOKEYS_VAULT_LABEL_PREFIX_0 0xc8u
+#endif
+#ifndef PICOKEYS_VAULT_LABEL_PREFIX_1
+#define PICOKEYS_VAULT_LABEL_PREFIX_1 0xc9u
+#endif
+
 static uint16_t vault_manifest_fid(uint8_t slot) {
-    return (uint16_t)((slot == 0 ? 0xc4u : 0xc5u) << 8);
+    return (uint16_t)((slot == 0 ? PICOKEYS_VAULT_MANIFEST_PREFIX_0 : PICOKEYS_VAULT_MANIFEST_PREFIX_1) << 8);
 }
 
 static uint16_t vault_record_fid(uint8_t slot, uint16_t object_type, uint8_t object_tag) {
     uint8_t prefix;
     if (object_type == PICOKEYS_VAULT_OBJECT_WRAP) {
-        prefix = slot == 0 ? 0xc6u : 0xc7u;
+        prefix = slot == 0 ? PICOKEYS_VAULT_WRAP_PREFIX_0 : PICOKEYS_VAULT_WRAP_PREFIX_1;
     }
     else {
-        prefix = slot == 0 ? 0xc8u : 0xc9u;
+        prefix = slot == 0 ? PICOKEYS_VAULT_LABEL_PREFIX_0 : PICOKEYS_VAULT_LABEL_PREFIX_1;
     }
     return (uint16_t)((prefix << 8) | object_tag);
 }
