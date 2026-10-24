@@ -32,7 +32,7 @@ uint16_t rdata_bk = 0x0;
 static bool response_pending = false;
 extern uint32_t timeout;
 bool is_chaining = false;
-uint8_t chain_buf[2038];
+uint8_t chain_buf[USB_BUFFER_SIZE - 10];
 uint8_t *chain_ptr = NULL;
 static uint8_t chain_header[4];
 

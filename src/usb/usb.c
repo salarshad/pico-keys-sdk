@@ -24,7 +24,19 @@
 #include "pico/bootrom.h"
 #include "pico/multicore.h"
 #include "hardware/sync.h"
-#define multicore_launch_func_core1(a) multicore_launch_core1((void (*) (void))a)
+/* The card thread (APDU processing) runs on core1. The pico-sdk default
+ * core1 stack is PICO_CORE1_STACK_SIZE (2 KB) in scratch X with no guard, which
+ * is too small for ML-DSA and already tight for secure messaging. Give core1 a
+ * dedicated, 8-byte aligned stack in main SRAM instead. */
+#ifndef PICOKEYS_CORE1_STACK_SIZE
+#ifdef ENABLE_PQC
+#define PICOKEYS_CORE1_STACK_SIZE (48u * 1024u)
+#else
+#define PICOKEYS_CORE1_STACK_SIZE (16u * 1024u)
+#endif
+#endif
+static uint32_t __attribute__((aligned(8))) core1_stack[PICOKEYS_CORE1_STACK_SIZE / sizeof(uint32_t)];
+#define multicore_launch_func_core1(a) multicore_launch_core1_with_stack((void (*) (void))a, core1_stack, sizeof(core1_stack))
 #endif
 #include "apdu.h"
 #ifndef ENABLE_EMULATION

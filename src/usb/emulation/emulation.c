@@ -342,9 +342,23 @@ uint16_t emul_read(uint8_t itf) {
     if (FD_ISSET(sock, &input)) {
         valread = recv(sock, (char *)&len, sizeof(len), 0);
         len = ntohs(len);
+        if (len > sizeof(emul_rx) - emul_rx_size) {
+            len = (uint16_t)(sizeof(emul_rx) - emul_rx_size);
+        }
         if (len > 0) {
             while (true) {
                 valread = recv(sock, (char *)emul_rx + emul_rx_size, len, 0);
+                /* Large frames (PQC APDUs reach 8 KB) can arrive in several
+                 * segments: complete the frame before processing it. */
+                while (valread > 0 && valread < (long)len) {
+                    long more = (long)recv(sock, (char *)emul_rx + emul_rx_size + valread, (size_t)(len - valread), 0);
+                    if (more > 0) {
+                        valread += more;
+                    }
+                    else {
+                        msleep(1);
+                    }
+                }
                 if (valread > 0) {
                     if (len == 1) {
                         uint8_t c = emul_rx[0];

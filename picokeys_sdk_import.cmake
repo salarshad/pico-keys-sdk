@@ -126,7 +126,10 @@ configure_bool_option(
     "PQC support:\t\t\t disabled"
 )
 if(ENABLE_PQC)
-    add_compile_definitions(ENABLE_PQC)
+    # ML-DSA-87 signatures are 4627 bytes and a PQC key generation response
+    # (CV request) is up to ~7.4 KB, so a single APDU response must exceed the
+    # default 2 KB USB/CCID buffer.
+    add_compile_definitions(ENABLE_PQC USB_BUFFER_SIZE=8192u)
 endif()
 
 set(MBEDTLS_SOURCES
@@ -275,11 +278,16 @@ if(ENABLE_PQC)
         ${CMAKE_CURRENT_LIST_DIR}/third-party/mldsa/mldsa
         ${CMAKE_CURRENT_LIST_DIR}/config/mldsa
     )
+    # One SDK-owned config header per library, for the libraries and for every
+    # consumer. An absolute path is required: the libraries' public headers sit
+    # next to their stock config and a quoted include resolves there first.
     add_compile_definitions(
         MLK_CONFIG_NAMESPACE_PREFIX=mlkem
         MLK_CONFIG_MULTILEVEL_BUILD=1
         MLD_CONFIG_NAMESPACE_PREFIX=mldsa
         MLD_CONFIG_MULTILEVEL_BUILD=1
+        MLK_CONFIG_FILE="${CMAKE_CURRENT_LIST_DIR}/config/mlkem/mlkem_native_config.h"
+        MLD_CONFIG_FILE="${CMAKE_CURRENT_LIST_DIR}/config/mldsa/mldsa_native_config.h"
     )
 endif()
 

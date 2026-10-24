@@ -37,6 +37,9 @@ static mbedtls_mpi sm_mSSC;
 static uint8_t sm_blocksize = 0;
 static uint8_t sm_iv[16];
 static bool sm_active = false;
+/* Wrap/verify scratch. Kept off the card-thread stack: it is USB_BUFFER_SIZE
+ * bytes (8 KB with PQC) and APDU processing is single-threaded. */
+static uint8_t sm_scratch[USB_BUFFER_SIZE];
 
 bool is_secured_apdu(void) {
     return CLA(apdu) & 0xC;
@@ -175,9 +178,9 @@ int sm_wrap(void) {
         return PICOKEYS_WRONG_LENGTH;
     }
 
-    uint8_t input[USB_BUFFER_SIZE];
+    uint8_t *input = sm_scratch;
     size_t input_len = 0;
-    memset(input, 0, sizeof(input));
+    memset(input, 0, sizeof(sm_scratch));
     mbedtls_mpi ssc;
     mbedtls_mpi_init(&ssc);
     mbedtls_mpi_add_int(&ssc, &sm_mSSC, 1);
@@ -262,8 +265,8 @@ void sm_update_iv(void) {
 }
 
 int sm_verify(void) {
-    uint8_t input[USB_BUFFER_SIZE];
-    memset(input, 0, sizeof(input));
+    uint8_t *input = sm_scratch;
+    memset(input, 0, sizeof(sm_scratch));
     size_t input_len = 0;
     int r = 0;
     bool add_header = (CLA(apdu) & 0xC) == 0xC;
@@ -271,7 +274,7 @@ int sm_verify(void) {
     if (data_len % sm_blocksize) {
         data_len += sm_blocksize;
     }
-    if (data_len + (add_header ? sm_blocksize : 0) > sizeof(input)) {
+    if (data_len + (add_header ? sm_blocksize : 0) > sizeof(sm_scratch)) {
         return PICOKEYS_WRONG_LENGTH;
     }
     mbedtls_mpi ssc;
@@ -302,7 +305,7 @@ int sm_verify(void) {
     while (tlv_walk(&ctxi, &p, &item)) {
         if (item.tag & 0x1) {
             size_t encoded_len = 1 + tlv_format_len((uint16_t)item.value.len, NULL) + item.value.len;
-            if (encoded_len > sizeof(input) - input_len) {
+            if (encoded_len > sizeof(sm_scratch) - input_len) {
                 return PICOKEYS_WRONG_LENGTH;
             }
             input[input_len++] = (uint8_t)item.tag;
@@ -322,7 +325,7 @@ int sm_verify(void) {
     }
     if (some_added) {
         size_t padding_len = sm_blocksize - (input_len % sm_blocksize);
-        if (padding_len > sizeof(input) - input_len) {
+        if (padding_len > sizeof(sm_scratch) - input_len) {
             return PICOKEYS_WRONG_LENGTH;
         }
         input[input_len++] = 0x80;

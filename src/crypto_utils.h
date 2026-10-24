@@ -29,6 +29,9 @@
 #define PICOKEYS_KEY_RSA_3K              0x0004
 #define PICOKEYS_KEY_RSA_4k              0x0008
 #define PICOKEYS_KEY_EC                  0x0010
+#define PICOKEYS_KEY_MLDSA               0x0020 /* ML-DSA (FIPS 204), seed form */
+#define PICOKEYS_KEY_MLKEM               0x0040 /* ML-KEM (FIPS 203), seed form */
+#define PICOKEYS_KEY_PQC                 (PICOKEYS_KEY_MLDSA | PICOKEYS_KEY_MLKEM)
 #define PICOKEYS_KEY_AES                 0x0f00 // It is a mask
 #define PICOKEYS_KEY_AES_128             0x0100
 #define PICOKEYS_KEY_AES_192             0x0200

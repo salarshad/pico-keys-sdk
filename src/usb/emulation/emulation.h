@@ -25,7 +25,9 @@
 #include <stdbool.h>
 #include "byte_array.h"
 
+#ifndef USB_BUFFER_SIZE
 #define USB_BUFFER_SIZE 4096
+#endif
 extern int emul_init(const char *host, uint16_t port);
 extern uint8_t emul_rx[USB_BUFFER_SIZE];
 extern uint16_t emul_rx_size, emul_tx_size;
